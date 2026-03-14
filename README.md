@@ -11,7 +11,7 @@
 - Отправка конфига и QR-кода письмом через `sendmail`
 - Добавление и удаление peer на выбранном WireGuard-интерфейсе
 - Управление состоянием серверных WireGuard-интерфейсов
-- Просмотр peer и логов серверного интерфейса
+- Просмотр raw peer и логов серверного интерфейса
 - Просмотр, показ и удаление выданных профилей
 - Просмотр текущей активности через `wg show <interface> dump`
 
@@ -109,13 +109,7 @@ cp config/wgctl.conf.example config/wgctl.conf
 
 ## Использование
 
-Показать настроенные серверы:
-
-```bash
-./wgctl.sh servers
-```
-
-Показать список серверов через группу команд:
+Показать список настроенных серверов:
 
 ```bash
 ./wgctl.sh server list
@@ -179,7 +173,9 @@ cp config/wgctl.conf.example config/wgctl.conf
 ./wgctl.sh activity
 ```
 
-Показать активность для одного peer:
+`activity` показывает только те peer, которые известны локальной базе `wgctl`, и выводит имя профиля вместо публичного ключа.
+
+Показать активность для одного профиля:
 
 ```bash
 ./wgctl.sh activity alice
@@ -210,6 +206,8 @@ cp config/wgctl.conf.example config/wgctl.conf
 ```bash
 ./wgctl.sh server peers public
 ```
+
+`server peers` показывает raw peer непосредственно из интерфейса WireGuard, включая те, которых может не быть в локальной базе `wgctl`.
 
 Показать последние логи интерфейса:
 

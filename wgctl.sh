@@ -54,7 +54,6 @@ Usage:
   wgctl.sh [global-options] server reload [ID]
   wgctl.sh [global-options] server peers [ID]
   wgctl.sh [global-options] server logs [ID]
-  wgctl.sh [global-options] servers
 
 Global options:
   --config PATH   Path to config file.
@@ -65,9 +64,8 @@ Commands:
   list      Show issued profiles for the selected server.
   show      Print metadata and the generated config for a profile.
   delete    Delete stored metadata and generated artifacts for a profile.
-  activity  Show peer activity from `wg show <interface> dump`.
+  activity  Show activity for issued profiles known to wgctl.
   server    Manage configured WireGuard server interfaces.
-  servers   Show configured server ids.
 EOF
 }
 
@@ -635,7 +633,7 @@ activity_profiles() {
   done
 
   printf 'Server: %s (%s)\n' "$SERVER_ID" "$WG_INTERFACE"
-  printf '%-24s %-24s %-21s %-16s %-12s %-12s\n' "NAME" "LAST_HANDSHAKE_UTC" "ENDPOINT" "ALLOWED_IPS" "RX_BYTES" "TX_BYTES"
+  printf '%-24s %-24s %-21s %-16s %-12s %-12s\n' "PROFILE" "LAST_HANDSHAKE_UTC" "ENDPOINT" "ALLOWED_IPS" "RX_BYTES" "TX_BYTES"
 
   while IFS=$'\t' read -r public_key _ endpoint allowed_ips latest_handshake rx tx _; do
     local profile_name="${peer_name_map[$public_key]:-}"
@@ -756,6 +754,7 @@ server_peers() {
   require_cmd wg
 
   printf 'Server: %s (%s)\n' "$SERVER_ID" "$WG_INTERFACE"
+  printf 'View: raw peers from server interface\n'
   printf '%-45s %-24s %-21s %-16s %-12s %-12s\n' "PUBLIC_KEY" "LAST_HANDSHAKE_UTC" "ENDPOINT" "ALLOWED_IPS" "RX_BYTES" "TX_BYTES"
 
   while IFS=$'\t' read -r public_key _ endpoint allowed_ips latest_handshake rx tx _; do
@@ -907,6 +906,7 @@ main() {
   load_config "$config_path"
 
   if [[ "$command" == "servers" ]]; then
+    (($# == 0)) || die "Use 'server list' instead of 'servers $*'"
     list_servers
     exit 0
   fi
