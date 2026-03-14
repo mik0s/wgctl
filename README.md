@@ -10,6 +10,8 @@
 - Генерация PNG QR-кода для мобильных клиентов
 - Отправка конфига и QR-кода письмом через `sendmail`
 - Добавление и удаление peer на выбранном WireGuard-интерфейсе
+- Управление состоянием серверных WireGuard-интерфейсов
+- Просмотр peer и логов серверного интерфейса
 - Просмотр, показ и удаление выданных профилей
 - Просмотр текущей активности через `wg show <interface> dump`
 
@@ -113,6 +115,12 @@ cp config/wgctl.conf.example config/wgctl.conf
 ./wgctl.sh servers
 ```
 
+Показать список серверов через группу команд:
+
+```bash
+./wgctl.sh server list
+```
+
 Если задан `DEFAULT_SERVER`, параметр `--server` можно не указывать — будет выбран сервер по умолчанию.
 
 Если `SERVER_<ID>_APPLY_CHANGES=true`, команды `create` и `delete` сразу меняют live-интерфейс выбранного сервера. `create --dry-run` не отправляет письмо и не трогает интерфейс.
@@ -175,6 +183,38 @@ cp config/wgctl.conf.example config/wgctl.conf
 
 ```bash
 ./wgctl.sh activity alice
+```
+
+Показать настройки одного сервера:
+
+```bash
+./wgctl.sh server show public
+```
+
+Показать состояние сервера по умолчанию:
+
+```bash
+./wgctl.sh server status
+```
+
+Поднять, остановить или перезагрузить интерфейс:
+
+```bash
+./wgctl.sh server up public
+./wgctl.sh server down public
+./wgctl.sh server reload public
+```
+
+Показать текущие peer на серверном интерфейсе:
+
+```bash
+./wgctl.sh server peers public
+```
+
+Показать последние логи интерфейса:
+
+```bash
+./wgctl.sh server logs public
 ```
 
 ## Что хранится

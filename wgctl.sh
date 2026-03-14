@@ -46,6 +46,14 @@ Usage:
   wgctl.sh [global-options] show NAME
   wgctl.sh [global-options] delete NAME
   wgctl.sh [global-options] activity [NAME]
+  wgctl.sh [global-options] server list
+  wgctl.sh [global-options] server show [ID]
+  wgctl.sh [global-options] server status [ID]
+  wgctl.sh [global-options] server up [ID]
+  wgctl.sh [global-options] server down [ID]
+  wgctl.sh [global-options] server reload [ID]
+  wgctl.sh [global-options] server peers [ID]
+  wgctl.sh [global-options] server logs [ID]
   wgctl.sh [global-options] servers
 
 Global options:
@@ -58,6 +66,7 @@ Commands:
   show      Print metadata and the generated config for a profile.
   delete    Delete stored metadata and generated artifacts for a profile.
   activity  Show peer activity from `wg show <interface> dump`.
+  server    Manage configured WireGuard server interfaces.
   servers   Show configured server ids.
 EOF
 }
@@ -171,6 +180,21 @@ resolve_server_id() {
   fi
 
   die "--server is required when DEFAULT_SERVER is not set"
+}
+
+resolve_server_selector() {
+  local requested_server_id="$1"
+  local positional_server_id="${2:-}"
+
+  if [[ -n "$requested_server_id" && -n "$positional_server_id" && "$requested_server_id" != "$positional_server_id" ]]; then
+    die "Conflicting server ids: --server=$requested_server_id and argument=$positional_server_id"
+  fi
+
+  if [[ -n "$positional_server_id" ]]; then
+    printf '%s' "$positional_server_id"
+  else
+    resolve_server_id "$requested_server_id"
+  fi
 }
 
 quote_value() {
@@ -627,16 +651,223 @@ activity_profiles() {
 list_servers() {
   [[ -n "${SERVERS:-}" ]] || die "SERVERS is required in config"
 
-  local server_id prefix interface_key profile_store_key interface profile_store
-  printf '%-16s %-16s %s\n' "SERVER_ID" "INTERFACE" "PROFILE_STORE"
+  local server_id prefix interface_key profile_store_key endpoint_key interface profile_store endpoint
+  printf '%-16s %-16s %-32s %s\n' "SERVER_ID" "INTERFACE" "ENDPOINT" "PROFILE_STORE"
   for server_id in $SERVERS; do
     prefix="SERVER_$(uppercase "$(sanitize_id "$server_id")")"
     interface_key="${prefix}_INTERFACE"
     profile_store_key="${prefix}_PROFILE_STORE"
+    endpoint_key="${prefix}_ENDPOINT"
     interface="${!interface_key:-}"
     profile_store="${!profile_store_key:-$SCRIPT_DIR/data/$server_id/profiles}"
-    printf '%-16s %-16s %s\n' "$server_id" "${interface:--}" "$profile_store"
+    endpoint="${!endpoint_key:-}"
+    printf '%-16s %-16s %-32s %s\n' "$server_id" "${interface:--}" "${endpoint:--}" "$profile_store"
   done
+}
+
+systemd_unit_name() {
+  printf 'wg-quick@%s.service' "$WG_INTERFACE"
+}
+
+server_is_active() {
+  if command -v systemctl >/dev/null 2>&1; then
+    if systemctl is-active --quiet "$(systemd_unit_name)"; then
+      return 0
+    fi
+  fi
+
+  if command -v wg >/dev/null 2>&1; then
+    local interfaces
+    interfaces="$(wg show interfaces 2>/dev/null || true)"
+    [[ " $interfaces " == *" $WG_INTERFACE "* ]]
+    return
+  fi
+
+  return 1
+}
+
+print_server_status_line() {
+  if server_is_active; then
+    printf 'active\n'
+  else
+    printf 'inactive\n'
+  fi
+}
+
+server_show() {
+  local positional_server_id="${1:-}"
+  if [[ -n "$positional_server_id" ]]; then
+    shift || true
+  fi
+  (($# == 0)) || die "Unknown server show option: $1"
+
+  local selected_server_id
+  selected_server_id="$(resolve_server_selector "${SERVER_ID:-}" "$positional_server_id")"
+  load_server_config "$selected_server_id"
+
+  cat <<EOF
+Server: $SERVER_ID
+Interface: $WG_INTERFACE
+Status: $(print_server_status_line)
+Endpoint: $WG_ENDPOINT
+AllowedIPs: $WG_ALLOWED_IPS
+Address pool: ${WG_ADDRESS_POOL:-disabled}
+Client prefix: $WG_CLIENT_PREFIX
+DNS: $WG_DNS
+PersistentKeepalive: $WG_PERSISTENT_KEEPALIVE
+Apply changes: $WG_APPLY_CHANGES
+Persist changes: $WG_PERSIST_CHANGES
+Server config: ${WG_SERVER_CONFIG:-disabled}
+Profile store: $PROFILE_STORE
+Artifact store: $ARTIFACT_STORE
+EOF
+}
+
+server_status() {
+  local positional_server_id="${1:-}"
+  if [[ -n "$positional_server_id" ]]; then
+    shift || true
+  fi
+  (($# == 0)) || die "Unknown server status option: $1"
+
+  local selected_server_id
+  selected_server_id="$(resolve_server_selector "${SERVER_ID:-}" "$positional_server_id")"
+  load_server_config "$selected_server_id"
+
+  printf 'Server: %s (%s)\n' "$SERVER_ID" "$WG_INTERFACE"
+  printf 'Status: %s\n' "$(print_server_status_line)"
+
+  if command -v systemctl >/dev/null 2>&1; then
+    printf 'Systemd unit: %s\n' "$(systemd_unit_name)"
+  fi
+}
+
+server_peers() {
+  local positional_server_id="${1:-}"
+  if [[ -n "$positional_server_id" ]]; then
+    shift || true
+  fi
+  (($# == 0)) || die "Unknown server peers option: $1"
+
+  local selected_server_id
+  selected_server_id="$(resolve_server_selector "${SERVER_ID:-}" "$positional_server_id")"
+  load_server_config "$selected_server_id"
+
+  require_cmd wg
+
+  printf 'Server: %s (%s)\n' "$SERVER_ID" "$WG_INTERFACE"
+  printf '%-45s %-24s %-21s %-16s %-12s %-12s\n' "PUBLIC_KEY" "LAST_HANDSHAKE_UTC" "ENDPOINT" "ALLOWED_IPS" "RX_BYTES" "TX_BYTES"
+
+  while IFS=$'\t' read -r public_key _ endpoint allowed_ips latest_handshake rx tx _; do
+    printf '%-45s %-24s %-21s %-16s %-12s %-12s\n' \
+      "$public_key" \
+      "$(format_handshake "$latest_handshake")" \
+      "${endpoint:--}" \
+      "${allowed_ips:--}" \
+      "$rx" \
+      "$tx"
+  done < <(wg show "$WG_INTERFACE" dump | tail -n +2)
+}
+
+server_logs() {
+  local positional_server_id="${1:-}"
+  if [[ -n "$positional_server_id" ]]; then
+    shift || true
+  fi
+  (($# == 0)) || die "Unknown server logs option: $1"
+
+  local selected_server_id
+  selected_server_id="$(resolve_server_selector "${SERVER_ID:-}" "$positional_server_id")"
+  load_server_config "$selected_server_id"
+
+  command -v journalctl >/dev/null 2>&1 || die "journalctl is required for server logs"
+
+  printf 'Server: %s (%s)\n' "$SERVER_ID" "$WG_INTERFACE"
+  if command -v systemctl >/dev/null 2>&1; then
+    journalctl -u "$(systemd_unit_name)" -n 50 --no-pager
+  else
+    journalctl -n 50 --no-pager
+  fi
+}
+
+run_server_action() {
+  local action="$1"
+  local positional_server_id="${2:-}"
+
+  local selected_server_id
+  selected_server_id="$(resolve_server_selector "${SERVER_ID:-}" "$positional_server_id")"
+  load_server_config "$selected_server_id"
+
+  case "$action" in
+    up)
+      if command -v systemctl >/dev/null 2>&1; then
+        systemctl start "$(systemd_unit_name)"
+      else
+        require_cmd wg-quick
+        wg-quick up "$WG_INTERFACE"
+      fi
+      ;;
+    down)
+      if command -v systemctl >/dev/null 2>&1; then
+        systemctl stop "$(systemd_unit_name)"
+      else
+        require_cmd wg-quick
+        wg-quick down "$WG_INTERFACE"
+      fi
+      ;;
+    reload)
+      if command -v systemctl >/dev/null 2>&1; then
+        systemctl restart "$(systemd_unit_name)"
+      else
+        require_cmd wg-quick
+        wg-quick down "$WG_INTERFACE"
+        wg-quick up "$WG_INTERFACE"
+      fi
+      ;;
+    *)
+      die "Unknown server action: $action"
+      ;;
+  esac
+
+  printf 'Server: %s (%s)\n' "$SERVER_ID" "$WG_INTERFACE"
+  printf 'Action: %s\n' "$action"
+  printf 'Status: %s\n' "$(print_server_status_line)"
+}
+
+server_command() {
+  local subcommand="${1:-}"
+  [[ -n "$subcommand" ]] || die "Server subcommand is required"
+  shift || true
+
+  case "$subcommand" in
+    list)
+      (($# == 0)) || die "server list does not accept extra arguments"
+      list_servers
+      ;;
+    show)
+      server_show "$@"
+      ;;
+    status)
+      server_status "$@"
+      ;;
+    peers)
+      server_peers "$@"
+      ;;
+    logs)
+      server_logs "$@"
+      ;;
+    up|down|reload)
+      local positional_server_id="${1:-}"
+      if [[ -n "$positional_server_id" ]]; then
+        shift || true
+      fi
+      (($# == 0)) || die "Unknown server $subcommand option: $1"
+      run_server_action "$subcommand" "$positional_server_id"
+      ;;
+    *)
+      die "Unknown server command: $subcommand"
+      ;;
+  esac
 }
 
 main() {
@@ -677,6 +908,25 @@ main() {
 
   if [[ "$command" == "servers" ]]; then
     list_servers
+    exit 0
+  fi
+
+  if [[ "$command" == "server" ]]; then
+    if [[ "${1:-}" == "list" ]]; then
+      server_command "$@"
+      exit 0
+    fi
+
+    if [[ "${1:-}" != "list" ]]; then
+      if [[ -n "${2:-}" && "${2:-}" != --* ]]; then
+        server_id="$(resolve_server_selector "$server_id" "${2:-}")"
+      else
+        server_id="$(resolve_server_id "$server_id")"
+      fi
+      load_server_config "$server_id"
+    fi
+
+    server_command "$@"
     exit 0
   fi
 
