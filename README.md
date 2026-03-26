@@ -98,8 +98,8 @@ cp config/wgctl.conf.example config/wgctl.conf
 - `SERVER_<ID>_DNS`: DNS-серверы, которые будут записаны в клиентский конфиг
 - `SERVER_<ID>_PERSISTENT_KEEPALIVE`: значение keepalive для roaming-клиентов
 - `SERVER_<ID>_APPLY_CHANGES`: если `true`, `create` добавляет peer в live-интерфейс, а `delete` удаляет его
-- `SERVER_<ID>_PERSIST_CHANGES`: если `true`, после изменений текущее состояние интерфейса сохраняется в `SERVER_<ID>_SERVER_CONFIG`
-- `SERVER_<ID>_SERVER_CONFIG`: путь до серверного WireGuard-конфига, используемого для сохранения состояния
+- `SERVER_<ID>_PERSIST_CHANGES`: если `true`, после изменений `wgctl` обновляет peer-секции в `SERVER_<ID>_SERVER_CONFIG`
+- `SERVER_<ID>_SERVER_CONFIG`: путь до серверного WireGuard-конфига, в котором `wgctl` управляет peer-секциями
 - `SERVER_<ID>_PROFILE_STORE`: директория для хранения метаданных профилей этого сервера
 - `SERVER_<ID>_ARTIFACT_STORE`: директория для конфигов, QR-кодов и peer snippets этого сервера
 
@@ -252,10 +252,11 @@ cp config/wgctl.conf.example config/wgctl.conf
 
 Server peer snippet можно вручную добавить в серверный WireGuard-конфиг или использовать в последующей автоматизации.
 
-Если `SERVER_<ID>_PERSIST_CHANGES=true`, после добавления или удаления peer текущий вывод `wg showconf <interface>` записывается в `SERVER_<ID>_SERVER_CONFIG`.
+Если `SERVER_<ID>_PERSIST_CHANGES=true`, `wgctl` переписывает в `SERVER_<ID>_SERVER_CONFIG` только peer-секции, сохраняя `[Interface]`, `PostUp`, `PostDown`, `SaveConfig` и прочие server-level параметры как есть.
 
 ## Ограничения
 
 - Автоматическая выдача адресов сейчас поддерживает только IPv4-пулы
 - Активность видна только для peer, которые сейчас присутствуют на выбранном серверном интерфейсе
 - Для live-изменений нужны права на выполнение `wg set` и, если включено сохранение, на запись в `SERVER_<ID>_SERVER_CONFIG`
+- Если в серверном конфиге есть peer, которыми `wgctl` не управляет, при `PERSIST_CHANGES=true` они будут удалены из peer-секций файла

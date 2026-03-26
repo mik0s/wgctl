@@ -344,12 +344,40 @@ persist_server_state() {
   fi
 
   [[ -n "$WG_SERVER_CONFIG" ]] || die "Persistence enabled but WG_SERVER_CONFIG is not set for server $SERVER_ID"
+  [[ -f "$WG_SERVER_CONFIG" ]] || die "Server config file does not exist: $WG_SERVER_CONFIG"
 
-  local config_dir
-  config_dir="$(dirname "$WG_SERVER_CONFIG")"
-  [[ -d "$config_dir" ]] || die "Server config directory does not exist: $config_dir"
+  persist_config_peers
+}
 
-  wg showconf "$WG_INTERFACE" > "$WG_SERVER_CONFIG"
+persist_config_peers() {
+  local tmp_file
+  tmp_file="$(mktemp)"
+
+  awk '
+    BEGIN { in_peer = 0 }
+    /^\[Peer\][[:space:]]*$/ { in_peer = 1; next }
+    in_peer == 0 { print }
+  ' "$WG_SERVER_CONFIG" > "$tmp_file"
+
+  if [[ -s "$tmp_file" ]]; then
+    printf '\n' >> "$tmp_file"
+  fi
+
+  local file first="true"
+  shopt -s nullglob
+  for file in "$PROFILE_STORE"/*.env; do
+    # shellcheck disable=SC1090
+    source "$file"
+    if [[ "$first" == "false" ]]; then
+      printf '\n' >> "$tmp_file"
+    fi
+    first="false"
+    cat "$PEER_FILE" >> "$tmp_file"
+    printf '\n' >> "$tmp_file"
+  done
+
+  chmod --reference="$WG_SERVER_CONFIG" "$tmp_file" 2>/dev/null || chmod 0640 "$tmp_file"
+  mv "$tmp_file" "$WG_SERVER_CONFIG"
 }
 
 apply_peer_on_server() {
