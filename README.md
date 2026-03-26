@@ -201,6 +201,14 @@ cp config/wgctl.conf.example config/wgctl.conf
 ./wgctl.sh server reload public
 ```
 
+Подтянуть все профили из локальной базы в live-интерфейс:
+
+```bash
+./wgctl.sh server sync public
+```
+
+Это полезно после перезапуска интерфейса или если peer есть в локальной базе `wgctl`, но отсутствуют в `wg0`/`wg1`.
+
 Показать текущие peer на серверном интерфейсе:
 
 ```bash

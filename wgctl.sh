@@ -52,6 +52,7 @@ Usage:
   wgctl.sh [global-options] server up [ID]
   wgctl.sh [global-options] server down [ID]
   wgctl.sh [global-options] server reload [ID]
+  wgctl.sh [global-options] server sync [ID]
   wgctl.sh [global-options] server peers [ID]
   wgctl.sh [global-options] server logs [ID]
 
@@ -362,6 +363,26 @@ apply_peer_on_server() {
   require_cmd wg
   wg set "$WG_INTERFACE" peer "$public_key" allowed-ips "$address"
   persist_server_state
+}
+
+apply_all_profiles_on_server() {
+  if ! is_true "$WG_APPLY_CHANGES"; then
+    return 0
+  fi
+
+  require_cmd wg
+
+  local file applied_count=0
+  shopt -s nullglob
+  for file in "$PROFILE_STORE"/*.env; do
+    # shellcheck disable=SC1090
+    source "$file"
+    wg set "$WG_INTERFACE" peer "$PUBLIC_KEY" allowed-ips "$ADDRESS"
+    applied_count=$((applied_count + 1))
+  done
+
+  persist_server_state
+  printf '%s\n' "$applied_count"
 }
 
 remove_peer_from_server() {
@@ -833,6 +854,26 @@ run_server_action() {
   printf 'Status: %s\n' "$(print_server_status_line)"
 }
 
+server_sync() {
+  local positional_server_id="${1:-}"
+  if [[ -n "$positional_server_id" ]]; then
+    shift || true
+  fi
+  (($# == 0)) || die "Unknown server sync option: $1"
+
+  local selected_server_id
+  selected_server_id="$(resolve_server_selector "${SERVER_ID:-}" "$positional_server_id")"
+  load_server_config "$selected_server_id"
+
+  local applied_count
+  applied_count="$(apply_all_profiles_on_server)"
+
+  printf 'Server: %s (%s)\n' "$SERVER_ID" "$WG_INTERFACE"
+  printf 'Action: sync\n'
+  printf 'Profiles applied: %s\n' "$applied_count"
+  printf 'Status: %s\n' "$(print_server_status_line)"
+}
+
 server_command() {
   local subcommand="${1:-}"
   [[ -n "$subcommand" ]] || die "Server subcommand is required"
@@ -848,6 +889,9 @@ server_command() {
       ;;
     status)
       server_status "$@"
+      ;;
+    sync)
+      server_sync "$@"
       ;;
     peers)
       server_peers "$@"
